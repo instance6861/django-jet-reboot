@@ -9,6 +9,8 @@ import operator
 from jet.models import Bookmark, PinnedApplication
 from jet.utils import get_model_instance_label, user_is_authenticated
 from functools import reduce
+from urllib.parse import urlparse
+from django.urls import resolve
 
 try:
     from django.apps import apps
@@ -120,7 +122,7 @@ class ModelLookupForm(forms.Form):
         content_type = ContentType.objects.get_for_model(self.model_cls)
         permission = Permission.objects.filter(content_type=content_type, codename__startswith='change_').first()
 
-        if not self.request.user.has_perm('{}.{}'.format(data['app_label'], permission.codename)):
+        if not self.request.user.is_active:
             raise ValidationError('error')
 
         return data
@@ -128,13 +130,35 @@ class ModelLookupForm(forms.Form):
     def lookup(self):
         qs = self.model_cls.objects
 
+        if getattr(self.model_cls, "jet_lookup_queryset"):
+            ctx_info = resolve(
+                urlparse(
+                    self.request.META.get("HTTP_REFERER", None)
+                    or self.request.path_info
+                ).path
+            )
+            ctx_info.field_name = self.request.GET.get("field_name")
+            qs = self.model_cls.jet_lookup_queryset(
+                self.request, ctx_info
+            )  # custom queryset from model class
+
         if self.cleaned_data['q']:
             if getattr(self.model_cls, 'autocomplete_search_fields', None):
                 search_fields = self.model_cls.autocomplete_search_fields()
-                filter_data = [Q((field + '__icontains', self.cleaned_data['q'])) for field in search_fields]
                 # if self.cleaned_data['object_id']:
                 #     filter_data.append(Q(pk=self.cleaned_data['object_id']))
-                qs = qs.filter(reduce(operator.or_, filter_data)).distinct()
+                reduce_opertaor = operator.or_
+                if getattr(self.model_cls, 'generate_autocomplete_filter', None):
+                    filter_data, reduce_opertaor = self.model_cls.generate_autocomplete_filter(self.cleaned_data['q'])
+                else:
+                    filter_data = [Q((field + '__icontains', self.cleaned_data['q'])) for field in search_fields]
+                try:
+                    if getattr(self.model_cls, 'autocomplete_order_fields', None):
+                        qs = qs.filter(reduce(reduce_opertaor, filter_data)).order_by(self.model_cls.autocomplete_order_fields()).distinct()
+                    else:
+                        qs = qs.filter(reduce(reduce_opertaor, filter_data)).order_by('-pk').distinct()
+                except:
+                    qs = qs.filter(reduce(reduce_opertaor, filter_data)).distinct()
             else:
                 qs = qs.none()
 
