@@ -65,7 +65,7 @@ def jet_select2_lookups(field):
         qs = field.field.queryset
         model = qs.model
 
-        if getattr(model, 'autocomplete_search_fields', None) and getattr(field.field, 'autocomplete', True):
+        if getattr(model, 'autocomplete_search_fields', None) and getattr(field.field, 'autocomplete', False):
             choices = []
             app_label = model._meta.app_label
             model_name = model._meta.object_name
@@ -74,7 +74,8 @@ def jet_select2_lookups(field):
                 'class': 'ajax',
                 'data-app-label': app_label,
                 'data-model': model_name,
-                'data-ajax--url': reverse('jet:model_lookup')
+                'data-field-name': field.name,
+                'data-ajax--url': reverse('jet:model_lookup')+ f"?field_name={field.name}"
             }
 
             initial_value = field.value()
